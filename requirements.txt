@@ -7,3 +7,5 @@ torchaudio
 scikit-learn
 matplotlib
 wordcloud
+accelerate
+safetensors
