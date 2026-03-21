@@ -26,22 +26,21 @@ Dieses Projekt untersucht Schweizerdeutsche Dialekte anhand von Audioaufnahmen a
 
 ```
 NLP---Swiss-German-Dialect-Data/
-├── README.md                      ← Du bist hier
-├── requirements.txt               ← Python-Abhängigkeiten
-├── analysis.ipynb                 ← Jupyter Notebook: Datenexploration & Visualisierung
-├── transcribe.py                  ← Whisper-Transkription aller 1400 Samples
-├── test_whisper_settings.py       ← A/B-Test verschiedener Whisper-Modelle
-├── classify.py                    ← TF-IDF, Classifier, Plots (TODO)
+├── README.md                  ← Du bist hier
+├── requirements.txt           ← Python-Abhängigkeiten
+├── analysis.ipynb             ← Jupyter Notebook: Datenexploration & Visualisierung
+├── transcribe.py              ← Whisper-Transkription aller 1400 Samples
+├── classify.py                ← TF-IDF, Classifier, Plots (TODO)
 ├── Data/
-│   ├── test.tsv                   ← Originaldaten (24'605 Aufnahmen)
-│   ├── train_all.tsv              ← Trainingsdaten (komplett)
-│   ├── train_balanced.tsv         ← Trainingsdaten (balanciert)
-│   ├── valid.tsv                  ← Validierungsdaten
-│   ├── sample.tsv                 ← Gefiltertes Sample (1'400 Aufnahmen, 200/Region)
-│   ├── transcriptions.csv         ← Whisper-Transkriptionen (Output von transcribe.py)
-│   └── clips__test/               ← Audiodateien (.mp3)
+│   ├── test.tsv               ← Originaldaten (24'605 Aufnahmen)
+│   ├── train_all.tsv          ← Trainingsdaten (komplett)
+│   ├── train_balanced.tsv     ← Trainingsdaten (balanciert)
+│   ├── valid.tsv              ← Validierungsdaten
+│   ├── sample.tsv             ← Gefiltertes Sample (1'400 Aufnahmen, 200/Region)
+│   ├── transcriptions.csv     ← Whisper-Transkriptionen (Output von transcribe.py)
+│   └── clips__test/           ← Audiodateien (.mp3)
 │       └── [speaker_id]/[clip_hash].mp3
-└── .venv/                         ← Virtuelle Umgebung (nicht im Repo)
+└── .venv/                     ← Virtuelle Umgebung (nicht im Repo)
 ```
 
 ---
@@ -51,18 +50,14 @@ NLP---Swiss-German-Dialect-Data/
 ### Voraussetzungen
 - Python 3.12+
 - macOS (Apple Silicon empfohlen für MPS-Beschleunigung)
-- `ffmpeg` (`brew install ffmpeg`)
 - ~10 GB Speicher für Whisper-Modell
 
 ### Installation
 
 ```bash
 # Repo klonen
-git clone https://github.com/GwenVocat/NLP---Swiss-German-Dialect-Data.git
+git clone https://github.com/<user>/NLP---Swiss-German-Dialect-Data.git
 cd NLP---Swiss-German-Dialect-Data
-
-# ffmpeg installieren (falls nicht vorhanden)
-brew install ffmpeg
 
 # Virtuelle Umgebung erstellen & aktivieren
 python3 -m venv .venv
@@ -133,20 +128,15 @@ jupyter notebook analysis.ipynb
 
 ### Schritt 2 – Transkription (`transcribe.py`)
 
-Transkribiert alle 1'400 Sample-Dateien mit **2 Modellen parallel**:
-
-| Modell | Beschreibung |
-|--------|-------------|
-| **A: `openai/whisper-large-v2`** | Standard Whisper (6 GB) |
-| **B: `Flurin17/whisper-large-v3-turbo-swiss-german`** | Fine-tuned auf 350h Schweizerdeutsch (1.6 GB) |
+Transkribiert alle 1'400 Sample-Dateien mit **Whisper large-v2**:
 
 - Erkennt automatisch Apple Silicon (MPS), CUDA oder CPU
 - Fortschrittsanzeige alle 50 Dateien
-- Speichert beide Transkriptionen nebeneinander in `Data/transcriptions.csv`
+- Speichert Ergebnisse als `Data/transcriptions.csv`
 
 ```bash
 python transcribe.py
-# ⏱ Dauer: ~45-60 Min (Apple Silicon), ~3-5h (CPU)
+# ⏱ Dauer: ~30-60 Min (Apple Silicon), ~2-3h (CPU)
 ```
 
 **Output-Spalten in `transcriptions.csv`:**
@@ -156,57 +146,19 @@ python transcribe.py
 | `path` | Dateipfad |
 | `dialect_region` | Dialektregion |
 | `sentence` | Original-Hochdeutsch (Referenz) |
-| `transcription_v2` | Whisper large-v2 (Standard) |
-| `transcription_swiss` | Swiss German fine-tuned Modell |
+| `transcription` | Whisper-Transkription (Hochdeutsch mit Dialekt-Leakage) |
 
-→ In der Analyse können beide Spalten verglichen werden, um zu sehen welches Modell besser für die Dialekterkennung funktioniert.
+> **Hinweis:** Whisper transkribiert in Hochdeutsch, aber dialektale Eigenheiten "leaken" durch (z.B. Wortstellung, regionale Begriffe). Genau dieses Leakage nutzen wir zur Dialekterkennung.
 
 ### Schritt 3 & 4 – Analyse & Klassifikation (`classify.py`) 🔜
 
-*Wird von Teamkollege übernommen:*
+*TODO*
 
 - **TF-IDF** pro Dialektregion → Top-Wörter extrahieren
 - **Cosine-Similarity Heatmap** zwischen Regionen
 - **Wordclouds** pro Region
 - **Classifier:** Logistic Regression vs. Naive Bayes (80/20 Split)
 - **Confusion Matrix** + **Schweizerkarte** mit Accuracy pro Region
-
----
-
-## ⚠️ Bekannte Limitierung: Whisper normalisiert Dialekt zu Hochdeutsch
-
-### Das Problem
-
-Whisper (alle Versionen) ist darauf trainiert, **Schweizerdeutsch → Hochdeutsch** zu übersetzen. Schweizerdeutsch hat keine standardisierte Schriftform, weshalb alle verfügbaren ASR-Modelle auf Hochdeutsch-Output trainiert sind.
-
-Wir haben mehrere Ansätze getestet:
-
-| Getestet | Ergebnis |
-|----------|----------|
-| `whisper-large-v2` mit `language="german"` | Stark normalisiertes Hochdeutsch |
-| `whisper-large-v2` ohne Language-Zwang | Identisches Ergebnis |
-| `Flurin17/whisper-large-v3-turbo-swiss-german` (feingetunt auf 350h CH-Deutsch) | Kaum Unterschied – auch Hochdeutsch-Output |
-
-**Quelle:** [Does Whisper Understand Swiss German? (ACL VarDial 2024)](https://aclanthology.org/2024.vardial-1.3/)
-
-### Was trotzdem durchkommt ("Leakage")
-
-Trotz der Normalisierung bleiben **subtile Dialekt-Unterschiede** in den Transkriptionen erhalten:
-
-| Phänomen | Original (HD) | Whisper-Output | Erklärung |
-|----------|--------------|----------------|-----------|
-| Perfekt statt Präteritum | "hatte trainiert" | "**hat** trainiert" | CH-Deutsch kennt kein Präteritum |
-| Wortersetzungen | "getilgt" | "**herausgestrichen**" | Dialektaler Wortschatz leakt |
-| Umformulierungen | "Deshalb sei..." | "**Wegen dem** sei..." | Andere Satzstruktur |
-| Totalausfälle | "An Ostern..." | "**Der Ast...**" | Starker Dialekt → Whisper versteht Müll |
-
-### Strategie
-
-Wir nutzen genau dieses Leakage: **TF-IDF über 200 Samples pro Region** sollte systematische Unterschiede zwischen den Dialektregionen aufdecken. Falls die Classifier-Accuracy tief ist, ist das selbst ein interessantes Ergebnis.
-
-### Mögliche Alternative (nicht umgesetzt)
-
-Statt textbasiert könnte man **Audio-Features direkt** vergleichen (Mel-Spektrogramme, MFCCs als Input für den Classifier). Das umgeht das Transkriptionsproblem komplett.
 
 ---
 
@@ -234,7 +186,6 @@ Wenn `transcribe.py` durchgelaufen ist, brauchst du:
 | scikit-learn | – | TF-IDF, Classifier, Metriken |
 | matplotlib | – | Visualisierungen |
 | wordcloud | – | Wordcloud-Grafiken |
-| ffmpeg | – | Audio-Dekodierung (System-Dependency) |
 
 ---
 
@@ -247,8 +198,8 @@ Wenn `transcribe.py` durchgelaufen ist, brauchst du:
 
 ---
 
-## 📝 Weitere Hinweise
+## 📝 Bekannte Hinweise
 
 - **NumPy-Konflikt:** Anaconda-Python (`/opt/anaconda3/bin/python`) hat einen Versionskonflikt. Immer das `.venv` verwenden!
 - **`sentence`-Spalte:** Enthält den hochdeutschen Quellsatz, NICHT die gesprochene Dialektversion. Für die Analyse die `transcription`-Spalte aus `transcriptions.csv` verwenden.
-- **Whisper-Modell:** Wird beim ersten Start heruntergeladen (~6 GB). Danach ist es lokal gecacht unter `~/.cache/huggingface/`.
+- **Whisper-Modell:** Wird beim ersten Start heruntergeladen (~6 GB). Danach ist es lokal gecacht.
