@@ -128,15 +128,16 @@ jupyter notebook analysis.ipynb
 
 ### Schritt 2 – Transkription (`transcribe.py`)
 
-Transkribiert alle 1'400 Sample-Dateien mit **Whisper large-v2**:
+Transkribiert alle 1'400 Sample-Dateien mit **2 Modellen parallel**:
 
-- Erkennt automatisch Apple Silicon (MPS), CUDA oder CPU
-- Fortschrittsanzeige alle 50 Dateien
-- Speichert Ergebnisse als `Data/transcriptions.csv`
+| Modell | Output | Zweck |
+|--------|--------|-------|
+| `openai/whisper-large-v2` | Hochdeutsch | Baseline – subtiles Dialekt-"Leakage" |
+| `neurlang/ipa-whisper-base` | IPA-Phoneme | Direkte Lautschrift – starkes Dialekt-Signal |
 
 ```bash
 python transcribe.py
-# ⏱ Dauer: ~30-60 Min (Apple Silicon), ~2-3h (CPU)
+# ⏱ Dauer: ~45-60 Min (Apple Silicon)
 ```
 
 **Output-Spalten in `transcriptions.csv`:**
@@ -146,9 +147,12 @@ python transcribe.py
 | `path` | Dateipfad |
 | `dialect_region` | Dialektregion |
 | `sentence` | Original-Hochdeutsch (Referenz) |
-| `transcription` | Whisper-Transkription (Hochdeutsch mit Dialekt-Leakage) |
+| `transcription_whisper` | Hochdeutsch (Whisper large-v2) |
+| `transcription_ipa` | IPA-Phoneme (neurlang/ipa-whisper-base) |
 
-> **Hinweis:** Whisper transkribiert in Hochdeutsch, aber dialektale Eigenheiten "leaken" durch (z.B. Wortstellung, regionale Begriffe). Genau dieses Leakage nutzen wir zur Dialekterkennung.
+> **Warum IPA?** Whisper normalisiert Dialekt zu Hochdeutsch – alle Regionen sehen fast gleich aus.
+> IPA transkribiert die **tatsächliche Aussprache**: Walliser `frˈyːɛɪk` vs. Zürcher `ruhig` wird direkt sichtbar.
+> Für den Classifier kann man beide Spalten vergleichen und schauen, welche besser performt.
 
 ### Schritt 3 & 4 – Analyse & Klassifikation (`classify.py`) 🔜
 

@@ -9,3 +9,5 @@ matplotlib
 wordcloud
 accelerate
 safetensors
+phonemizer
+protobuf
