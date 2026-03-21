@@ -133,15 +133,20 @@ jupyter notebook analysis.ipynb
 
 ### Schritt 2 – Transkription (`transcribe.py`)
 
-Transkribiert alle 1'400 Sample-Dateien mit **Whisper large-v2**:
+Transkribiert alle 1'400 Sample-Dateien mit **2 Modellen parallel**:
+
+| Modell | Beschreibung |
+|--------|-------------|
+| **A: `openai/whisper-large-v2`** | Standard Whisper (6 GB) |
+| **B: `Flurin17/whisper-large-v3-turbo-swiss-german`** | Fine-tuned auf 350h Schweizerdeutsch (1.6 GB) |
 
 - Erkennt automatisch Apple Silicon (MPS), CUDA oder CPU
 - Fortschrittsanzeige alle 50 Dateien
-- Speichert Ergebnisse als `Data/transcriptions.csv`
+- Speichert beide Transkriptionen nebeneinander in `Data/transcriptions.csv`
 
 ```bash
 python transcribe.py
-# ⏱ Dauer: ~27 Min (Apple Silicon), ~2-3h (CPU)
+# ⏱ Dauer: ~45-60 Min (Apple Silicon), ~3-5h (CPU)
 ```
 
 **Output-Spalten in `transcriptions.csv`:**
@@ -151,7 +156,10 @@ python transcribe.py
 | `path` | Dateipfad |
 | `dialect_region` | Dialektregion |
 | `sentence` | Original-Hochdeutsch (Referenz) |
-| `transcription` | Whisper-Transkription (Hochdeutsch mit Dialekt-Leakage) |
+| `transcription_v2` | Whisper large-v2 (Standard) |
+| `transcription_swiss` | Swiss German fine-tuned Modell |
+
+→ In der Analyse können beide Spalten verglichen werden, um zu sehen welches Modell besser für die Dialekterkennung funktioniert.
 
 ### Schritt 3 & 4 – Analyse & Klassifikation (`classify.py`) 🔜
 
