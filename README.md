@@ -6,7 +6,7 @@
 
 ## 📋 Projektübersicht
 
-Dieses Projekt untersucht Schweizerdeutsche Dialekte anhand von Audioaufnahmen aus dem [Swiss German Speech Corpus](https://www.sds-www.ch/). Sprachaufnahmen werden mit **OpenAI Whisper** transkribiert und anschliessend mittels **TF-IDF** und **Machine Learning** analysiert, um Dialektregionen automatisch zu erkennen.
+Dieses Projekt untersucht Schweizerdeutsche Dialekte anhand von Audioaufnahmen aus dem [Swiss German Speech Corpus](https://www.sds-www.ch/). Sprachaufnahmen werden mit zwei Modellen transkribiert: Whisper liefert Hochdeutsch-Text, wav2vec2-lv-60-espeak-cv-ft liefert IPA-Phoneme. Anschliessend mittels **TF-IDF** und **Machine Learning** analysiert, um Dialektregionen automatisch zu erkennen.
 
 ### Dialektregionen (7)
 
