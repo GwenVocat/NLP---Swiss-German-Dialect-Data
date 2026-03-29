@@ -1,6 +1,8 @@
 # 🇨🇭 Schweizerdeutsche Dialekt-Analyse
 
-**Forschungsfrage:** *Wie unterscheidet sich der Wortschatz der sieben Schweizerdeutschen Dialektregionen, und können diese Unterschiede zur automatischen Dialekterkennung genutzt werden?*
+**Forschungsfrage:** *Wie lassen sich die häufigsten Wörter des [Region]-Dialekts systematisch hochdeutschen Äquivalenten zuordnen?*
+
+Abrgrenzen, und vielleicht nur einzelne wörter eine Region
 
 ---
 
@@ -155,8 +157,6 @@ python transcribe.py
 > Für den Classifier kann man beide Spalten vergleichen und schauen, welche besser performt.
 
 ### Schritt 3 & 4 – Analyse & Klassifikation (`classify.py`) 🔜
-
-*TODO*
 
 - **TF-IDF** pro Dialektregion → Top-Wörter extrahieren
 - **Cosine-Similarity Heatmap** zwischen Regionen
