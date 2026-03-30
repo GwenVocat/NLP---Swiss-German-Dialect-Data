@@ -1,6 +1,6 @@
 # 🇨🇭 Schweizerdeutsche Dialekt-Analyse
 
-**Forschungsfrage:** *Wie lassen sich die häufigsten Wörter des [Region]-Dialekts systematisch hochdeutschen Äquivalenten zuordnen?*
+**Forschungsfrage:** *Wie lassen sich die häufigsten Wörter des Ostschweiz-Dialekts systematisch hochdeutschen Äquivalenten zuordnen?*
 
 Abrgrenzen, und vielleicht nur einzelne wörter eine Region
 
@@ -198,7 +198,7 @@ Wenn `transcribe.py` durchgelaufen ist, brauchst du:
 | Wer | Aufgabe |
 |-----|---------|
 | Gwen | Schritte 1–2: Exploration, Sampling, Transkription |
-| Teamkollege | Schritte 3–4: TF-IDF, Classifier, Visualisierungen |
+| Chris | Schritte 3–4: TF-IDF, Classifier, Visualisierungen |
 
 ---
 

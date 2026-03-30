@@ -1,23 +1,29 @@
 """
 Whisper-Transkription aller 1400 Sample-Dateien mit 2 Modellen
++ Wort-Alignment via phonetische Distanz
 
 Modell A: openai/whisper-large-v2 → Hochdeutsch (Baseline)
 Modell B: neurlang/ipa-whisper-base → IPA-Phoneme (Dialekt-Signal)
 
-Die IPA-Transkription zeigt die tatsächliche Aussprache – Dialektunterschiede
-werden direkt sichtbar (z.B. Walliser /frˈyːɛɪk/ vs. Zürcher "ruhig").
+Schritt 2.4: Referenzsatz (HD) → IPA, dann Wort-Alignment mit gesprochener
+IPA via Levenshtein-Distanz. So wird sichtbar, welches Dialektwort welchem
+Hochdeutschen Wort entspricht und wie gross die Abweichung ist.
 
 Verwendung: python transcribe.py
 Dauer:      ~45-60 Min auf Apple Silicon (MPS)
 """
 
 import os
+import json
 import time
 import warnings
 import pandas as pd
 import librosa
 import torch
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
+from phonemizer import phonemize
+from phonemizer.separator import Separator
+import Levenshtein
 
 # Warnungen unterdrücken
 warnings.filterwarnings("ignore", message=".*forced_decoder_ids.*")
@@ -174,18 +180,124 @@ for i, (_, row) in enumerate(sample.iterrows()):
             f"{elapsed:.0f}s vergangen | ~{remaining:.0f}s verbleibend"
         )
 
-# Speichern
+# Zwischenspeichern (vor Alignment)
 df_results = pd.DataFrame(results)
-df_results.to_csv(OUTPUT_CSV, index=False)
 
 elapsed_total = time.time() - start_time
 print(f"\n{'=' * 60}")
-print(f"✅ Fertig!")
+print(f"Transkription abgeschlossen!")
 print(f"   Erfolgreich: {len(results) - len(errors):,} / {total:,}")
 print(f"   Fehler:      {len(errors):,}")
 print(f"   Dauer:       {elapsed_total / 60:.1f} Minuten")
+print(f"{'=' * 60}")
+
+# ============================================================
+# Schritt 2.4 – Wort-Alignment: Referenz-IPA ↔ gesprochene IPA
+# ============================================================
+print("\n" + "=" * 60)
+print("SCHRITT 2.4 – Wort-Alignment (Referenz-IPA ↔ gesprochene IPA)")
+print("=" * 60)
+
+IPA_SEP = Separator(phone=" ", word="  ", syllable="")
+
+
+def sentence_to_ipa(text):
+    """Deutschen Satz Wort-für-Wort in IPA umwandeln via espeak-ng."""
+    ipa = phonemize(
+        text,
+        language="de",
+        backend="espeak",
+        separator=IPA_SEP,
+        strip=True,
+        preserve_punctuation=False,
+    )
+    return ipa
+
+
+def align_words(ref_ipa, spoken_ipa):
+    """
+    Wort-Alignment via minimale Levenshtein-Distanz.
+
+    Für jedes gesprochene IPA-Wort wird das ähnlichste Referenz-IPA-Wort
+    gesucht (greedy, ohne Wiederverwendungs-Einschränkung).
+
+    Returns: Liste von Dicts mit ref_word, spoken_word, distance
+    """
+    ref_words = ref_ipa.split()
+    spoken_words = spoken_ipa.split()
+
+    if not ref_words or not spoken_words:
+        return []
+
+    alignment = []
+    for sp_word in spoken_words:
+        best_ref = None
+        best_dist = float("inf")
+        for r_word in ref_words:
+            dist = Levenshtein.distance(sp_word, r_word)
+            if dist < best_dist:
+                best_dist = dist
+                best_ref = r_word
+        alignment.append({
+            "ref_ipa": best_ref,
+            "spoken_ipa": sp_word,
+            "distance": best_dist,
+        })
+
+    return alignment
+
+
+# Referenzsätze → IPA (Batch für Performance)
+print("\nKonvertiere Referenzsätze → IPA (espeak-ng) ...")
+sentences = df_results["sentence"].tolist()
+sentences_ipa_raw = phonemize(
+    sentences,
+    language="de",
+    backend="espeak",
+    separator=IPA_SEP,
+    strip=True,
+    preserve_punctuation=False,
+)
+# phonemize gibt bei Listen eine Liste zurück
+if isinstance(sentences_ipa_raw, str):
+    sentences_ipa_raw = [sentences_ipa_raw]
+
+df_results["sentence_ipa"] = sentences_ipa_raw
+print(f"   {len(sentences_ipa_raw):,} Sätze konvertiert.")
+
+# Wort-Alignment berechnen
+print("Berechne Wort-Alignments ...")
+alignments = []
+for _, row in df_results.iterrows():
+    ref_ipa = row.get("sentence_ipa", "")
+    spoken_ipa = row.get("transcription_ipa", "")
+    if ref_ipa and spoken_ipa:
+        al = align_words(str(ref_ipa), str(spoken_ipa))
+        alignments.append(json.dumps(al, ensure_ascii=False))
+    else:
+        alignments.append("[]")
+
+df_results["word_alignment"] = alignments
+
+# Mittlere Distanz pro Zeile als schnelle Metrik
+def mean_distance(alignment_json):
+    al = json.loads(alignment_json)
+    if not al:
+        return None
+    return round(sum(a["distance"] for a in al) / len(al), 2)
+
+df_results["mean_ipa_distance"] = df_results["word_alignment"].apply(mean_distance)
+
+# Speichern
+df_results.to_csv(OUTPUT_CSV, index=False)
+
+print(f"\n{'=' * 60}")
+print(f"✅ Fertig!")
 print(f"   Gespeichert: {OUTPUT_CSV}")
 print(f"{'=' * 60}")
 print(f"\n📊 Output-Spalten:")
 print(f"   transcription_whisper → Hochdeutsch (Baseline)")
 print(f"   transcription_ipa     → IPA-Phoneme (Dialekt-Signal)")
+print(f"   sentence_ipa          → Referenzsatz in IPA (espeak-ng)")
+print(f"   word_alignment        → JSON: Wortpaare + Levenshtein-Distanz")
+print(f"   mean_ipa_distance     → Mittlere Distanz pro Satz")
