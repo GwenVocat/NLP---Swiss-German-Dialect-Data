@@ -28,33 +28,11 @@ regions = sorted(df["dialect_region"].unique())
 print(f"   {len(df):,} Zeilen, {len(regions)} Regionen: {regions}")
 
 
-# ============================================================
-# 2. IPA-Bereinigung: Prosodische Marker entfernen
-# ============================================================
-print("\n2. IPA-Bereinigung...")
 
-# Zeichen die entfernt werden (prosodische Marker, keine Laute)
-IPA_REMOVE = str.maketrans("", "", "ˈˌː")
-
-df["ipa_clean"] = (
-    df["transcription_ipa"]
-    .str.translate(IPA_REMOVE)
-    .str.replace(r"\s+", " ", regex=True)
-    .str.strip()
-)
-
-orig_len = df["transcription_ipa"].str.len().sum()
-clean_len = df["ipa_clean"].str.len().sum()
-removed = orig_len - clean_len
-print(f"   Entfernte Zeichen: {removed:,} von {orig_len:,} ({removed/orig_len:.1%})")
-
-# Bereinigte Daten speichern
-df.to_csv("Data/transcriptions_clean.csv", index=False)
-print("   Gespeichert: Data/transcriptions_clean.csv")
 
 
 # ============================================================
-# 3. TF-IDF berechnen
+# 2. TF-IDF berechnen
 # ============================================================
 print("\n3. TF-IDF berechnen...")
 
@@ -92,7 +70,7 @@ for i, region in enumerate(region_docs_ipa.index):
 
 
 # ============================================================
-# 4. Ergebnisse speichern
+# 3. Ergebnisse speichern
 # ============================================================
 print("\n4. Ergebnisse speichern...")
 
