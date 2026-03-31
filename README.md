@@ -31,7 +31,7 @@ NLP---Swiss-German-Dialect-Data/
 ├── README.md                  ← Du bist hier
 ├── requirements.txt           ← Python-Abhängigkeiten
 ├── analysis.ipynb             ← Jupyter Notebook: Datenexploration & Visualisierung
-├── transcribe.py              ← Whisper-Transkription aller 1400 Samples
+├── transcribe.py              ← Whisper-Transkription aller Samples von der Ostschweizer Dialektes
 ├── classify.py                ← TF-IDF, Classifier, Plots (TODO)
 ├── Data/
 │   ├── test.tsv               ← Originaldaten (24'605 Aufnahmen)

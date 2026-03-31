@@ -1,31 +1,26 @@
 """
-Whisper-Transkription aller 1400 Sample-Dateien mit 2 Modellen
-+ Wort-Alignment via phonetische Distanz
+Transkription Ostschweizer Dialektaufnahmen – OPTIMIERTE VERSION
 
-Modell A: openai/whisper-large-v2 → Hochdeutsch (Baseline)
-Modell B: neurlang/ipa-whisper-base → IPA-Phoneme (Dialekt-Signal)
+Optimierungen gegenüber transcribe.py:
+  1. Sequenzielles Modell-Laden (halber RAM: nur 1 Modell zur Zeit)
+  2. Phonemizer gebatcht am Schluss (2 Aufrufe statt ~7'000)
+  3. Einzel-Clip-Inferenz auf MPS (stabil, kein Memory-Leak)
 
-Schritt 2.4: Referenzsatz (HD) → IPA, dann Wort-Alignment mit gesprochener
-IPA via Levenshtein-Distanz. So wird sichtbar, welches Dialektwort welchem
-Hochdeutschen Wort entspricht und wie gross die Abweichung ist.
-
-Verwendung: python transcribe.py
-Dauer:      ~45-60 Min auf Apple Silicon (MPS)
+Verwendung: python transcribe_fast.py
 """
 
+import gc
 import os
-import json
 import time
 import warnings
+
 import pandas as pd
 import librosa
 import torch
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from phonemizer import phonemize
 from phonemizer.separator import Separator
-import Levenshtein
 
-# Warnungen unterdrücken
 warnings.filterwarnings("ignore", message=".*forced_decoder_ids.*")
 warnings.filterwarnings("ignore", message=".*attention mask.*")
 warnings.filterwarnings("ignore", message=".*logits_process.*")
@@ -34,270 +29,187 @@ warnings.filterwarnings("ignore", message=".*torch_dtype.*")
 # ============================================================
 # Konfiguration
 # ============================================================
-MODEL_A = "openai/whisper-large-v2"
-MODEL_B = "neurlang/ipa-whisper-base"
-SAMPLE_TSV = "Data/sample.tsv"
-CLIPS_DIR = "Data/clips__test"
+DATA_TSV   = "Data/test.tsv"
+CLIPS_DIR  = "Data/clips__test"
 OUTPUT_CSV = "Data/transcriptions.csv"
+ERRORS_CSV = "Data/errors.csv"
+
+MODEL_IPA_WHISPER   = "neurlang/ipa-whisper-base"
+MODEL_SWISS_WHISPER = "Flurin17/whisper-large-v3-turbo-swiss-german"
+
+PHONE_SEP = Separator(phone="", word=" ", syllable="")
 
 # ============================================================
 # Device
 # ============================================================
 if torch.backends.mps.is_available():
     device = torch.device("mps")
-    print("🖥  Device: Apple Silicon (MPS)")
+    print("Device: Apple Silicon (MPS)")
 elif torch.cuda.is_available():
     device = torch.device("cuda")
-    print("🖥  Device: CUDA GPU")
+    print("Device: CUDA GPU")
 else:
     device = torch.device("cpu")
-    print("🖥  Device: CPU (wird langsam!)")
+    print("Device: CPU (wird langsam!)")
 
 # ============================================================
-# Schritt 2.1 – Beide Modelle laden
+# Hilfsfunktionen
 # ============================================================
-print("=" * 60)
-print("SCHRITT 2.1 – Modelle laden")
-print("=" * 60)
 
-# Modell A: Whisper large-v2 → Hochdeutsch
-print(f"\n📦 Lade Modell A: {MODEL_A} ...")
-processor_a = WhisperProcessor.from_pretrained(MODEL_A)
-model_a = WhisperForConditionalGeneration.from_pretrained(MODEL_A).to(device)
-model_a.eval()
-forced_decoder_ids = processor_a.get_decoder_prompt_ids(
-    language="german", task="transcribe"
-)
-print("✅ Modell A geladen (Whisper → Hochdeutsch)")
-
-# Modell B: IPA Whisper → Phoneme
-print(f"\n📦 Lade Modell B: {MODEL_B} ...")
-processor_b = WhisperProcessor.from_pretrained(MODEL_B)
-model_b = WhisperForConditionalGeneration.from_pretrained(MODEL_B).to(device)
-model_b.eval()
-print("✅ Modell B geladen (Whisper → IPA)\n")
-
-# ============================================================
-# Schritt 2.2 – Test mit einer einzelnen Datei
-# ============================================================
-print("=" * 60)
-print("SCHRITT 2.2 – Test mit einer Datei (beide Modelle)")
-print("=" * 60)
-
-sample = pd.read_csv(SAMPLE_TSV, sep="\t")
-print(f"📄 Sample geladen: {len(sample):,} Zeilen\n")
-
-test_row = sample.iloc[0]
-test_path = os.path.join(CLIPS_DIR, test_row["path"])
-y, sr = librosa.load(test_path, sr=16000)
-
-# Modell A
-input_features = processor_a(
-    y, sampling_rate=16000, return_tensors="pt"
-).input_features.to(device)
-with torch.no_grad():
-    predicted_ids = model_a.generate(
-        input_features, forced_decoder_ids=forced_decoder_ids
-    )
-text_a = processor_a.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
-
-# Modell B
-input_features_b = processor_b(
-    y, sampling_rate=16000, return_tensors="pt"
-).input_features.to(device)
-with torch.no_grad():
-    predicted_ids_b = model_b.generate(input_features_b)
-text_b = processor_b.batch_decode(predicted_ids_b, skip_special_tokens=True)[0].strip()
-
-print(f"📁 Datei:              {test_row['path']}")
-print(f"🗺  Region:             {test_row['dialect_region']}")
-print(f"📝 Original (HD):      {test_row['sentence']}")
-print(f"🔵 A (Hochdeutsch):    {text_a}")
-print(f"🟡 B (IPA):            {text_b}")
-print(f"\n✅ Einzeltest erfolgreich!\n")
-
-# ============================================================
-# Schritt 2.3 – Alle 1400 Dateien transkribieren (beide Modelle)
-# ============================================================
-print("=" * 60)
-print("SCHRITT 2.3 – Transkription aller Dateien (2 Modelle)")
-print("=" * 60)
-
-results = []
-errors = []
-total = len(sample)
-start_time = time.time()
-
-for i, (_, row) in enumerate(sample.iterrows()):
-    audio_path = os.path.join(CLIPS_DIR, row["path"])
-
-    text_a = ""
-    text_b = ""
-
-    try:
-        y, sr = librosa.load(audio_path, sr=16000)
-
-        # Modell A: Whisper → Hochdeutsch
-        input_features = processor_a(
-            y, sampling_rate=16000, return_tensors="pt"
-        ).input_features.to(device)
-        with torch.no_grad():
-            predicted_ids = model_a.generate(
-                input_features, forced_decoder_ids=forced_decoder_ids
-            )
-        text_a = processor_a.batch_decode(
-            predicted_ids, skip_special_tokens=True
-        )[0].strip()
-
-        # Modell B: Whisper → IPA
-        input_features_b = processor_b(
-            y, sampling_rate=16000, return_tensors="pt"
-        ).input_features.to(device)
-        with torch.no_grad():
-            predicted_ids_b = model_b.generate(input_features_b)
-        text_b = processor_b.batch_decode(
-            predicted_ids_b, skip_special_tokens=True
-        )[0].strip()
-
-    except Exception as e:
-        errors.append({"path": row["path"], "error": str(e)})
-
-    results.append({
-        "path": row["path"],
-        "dialect_region": row["dialect_region"],
-        "sentence": row["sentence"],
-        "transcription_whisper": text_a,
-        "transcription_ipa": text_b,
-    })
-
-    # Fortschritt alle 50 Dateien
-    if (i + 1) % 50 == 0 or (i + 1) == total:
-        elapsed = time.time() - start_time
-        per_file = elapsed / (i + 1)
-        remaining = per_file * (total - i - 1)
-        print(
-            f"  [{i+1:4d}/{total}]  "
-            f"{elapsed:.0f}s vergangen | ~{remaining:.0f}s verbleibend"
-        )
-
-# Zwischenspeichern (vor Alignment)
-df_results = pd.DataFrame(results)
-
-elapsed_total = time.time() - start_time
-print(f"\n{'=' * 60}")
-print(f"Transkription abgeschlossen!")
-print(f"   Erfolgreich: {len(results) - len(errors):,} / {total:,}")
-print(f"   Fehler:      {len(errors):,}")
-print(f"   Dauer:       {elapsed_total / 60:.1f} Minuten")
-print(f"{'=' * 60}")
-
-# ============================================================
-# Schritt 2.4 – Wort-Alignment: Referenz-IPA ↔ gesprochene IPA
-# ============================================================
-print("\n" + "=" * 60)
-print("SCHRITT 2.4 – Wort-Alignment (Referenz-IPA ↔ gesprochene IPA)")
-print("=" * 60)
-
-IPA_SEP = Separator(phone=" ", word="  ", syllable="")
+def free_model():
+    gc.collect()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+    elif torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
-def sentence_to_ipa(text):
-    """Deutschen Satz Wort-für-Wort in IPA umwandeln via espeak-ng."""
-    ipa = phonemize(
-        text,
+def transcribe_single(y, processor, model, forced_ids=None) -> str:
+    """Ein einzelner Clip → Text (stabil auf MPS)."""
+    features = processor(y, sampling_rate=16000, return_tensors="pt").input_features
+    features = features.to(device=device, dtype=model.dtype)
+
+    gen_kwargs = {}
+    if forced_ids is not None:
+        gen_kwargs["forced_decoder_ids"] = forced_ids
+
+    with torch.no_grad():
+        ids = model.generate(features, **gen_kwargs)
+
+    return processor.batch_decode(ids, skip_special_tokens=True)[0].strip()
+
+
+def batch_text_to_ipa(texts: list[str]) -> list[str]:
+    """Alle Texte → IPA in einem einzigen espeak-ng-Aufruf."""
+    clean = [t if isinstance(t, str) and t.strip() else "." for t in texts]
+    results = phonemize(
+        clean,
         language="de",
         backend="espeak",
-        separator=IPA_SEP,
+        separator=PHONE_SEP,
         strip=True,
         preserve_punctuation=False,
     )
-    return ipa
+    return [
+        r.strip() if (isinstance(t, str) and t.strip()) else ""
+        for r, t in zip(results, texts)
+    ]
 
 
-def align_words(ref_ipa, spoken_ipa):
-    """
-    Wort-Alignment via minimale Levenshtein-Distanz.
+def run_whisper_phase(df, model_name, phase_label, forced_ids_fn=None):
+    """Lädt Modell, transkribiert alle Clips einzeln, entlädt Modell."""
 
-    Für jedes gesprochene IPA-Wort wird das ähnlichste Referenz-IPA-Wort
-    gesucht (greedy, ohne Wiederverwendungs-Einschränkung).
+    print(f"\n{'=' * 60}")
+    print(f"{phase_label}")
+    print(f"{'=' * 60}")
 
-    Returns: Liste von Dicts mit ref_word, spoken_word, distance
-    """
-    ref_words = ref_ipa.split()
-    spoken_words = spoken_ipa.split()
+    print(f"\nLade {model_name} ...")
+    processor = WhisperProcessor.from_pretrained(model_name)
+    model = WhisperForConditionalGeneration.from_pretrained(
+        model_name, torch_dtype=torch.float32
+    ).to(device)
+    model.eval()
 
-    if not ref_words or not spoken_words:
-        return []
+    forced_ids = forced_ids_fn(processor) if forced_ids_fn else None
+    print("Modell geladen – starte Transkription ...\n")
 
-    alignment = []
-    for sp_word in spoken_words:
-        best_ref = None
-        best_dist = float("inf")
-        for r_word in ref_words:
-            dist = Levenshtein.distance(sp_word, r_word)
-            if dist < best_dist:
-                best_dist = dist
-                best_ref = r_word
-        alignment.append({
-            "ref_ipa": best_ref,
-            "spoken_ipa": sp_word,
-            "distance": best_dist,
-        })
+    transcriptions = {}
+    errors = []
+    total = len(df)
+    t0 = time.time()
 
-    return alignment
+    for i, (_, row) in enumerate(df.iterrows()):
+        audio_path = os.path.join(CLIPS_DIR, row["path"])
+        try:
+            y, _ = librosa.load(audio_path, sr=16000)
+            txt = transcribe_single(y, processor, model, forced_ids)
+            transcriptions[row["path"]] = txt
+        except Exception as e:
+            errors.append({"path": row["path"], "error": str(e)})
+
+        if (i + 1) % 100 == 0 or (i + 1) == total:
+            elapsed = time.time() - t0
+            remain  = (elapsed / (i + 1)) * (total - i - 1)
+            print(
+                f"  [{i+1:4d}/{total}]  "
+                f"{elapsed/60:.1f} min | ~{remain/60:.1f} min verbleibend"
+            )
+
+    # Modell entladen
+    del model, processor
+    free_model()
+    print(f"Modell entladen.\n")
+
+    return transcriptions, errors
 
 
-# Referenzsätze → IPA (Batch für Performance)
-print("\nKonvertiere Referenzsätze → IPA (espeak-ng) ...")
-sentences = df_results["sentence"].tolist()
-sentences_ipa_raw = phonemize(
-    sentences,
-    language="de",
-    backend="espeak",
-    separator=IPA_SEP,
-    strip=True,
-    preserve_punctuation=False,
+# ============================================================
+# Hauptprogramm
+# ============================================================
+overall_start = time.time()
+
+# Daten laden
+df_full = pd.read_csv(DATA_TSV, sep="\t")
+df = df_full[df_full["dialect_region"] == "Ostschweiz"].reset_index(drop=True)
+print(f"\nAufnahmen: {len(df):,} Ostschweiz (von {len(df_full):,} gesamt)")
+
+# Phase 1: IPA-Whisper (Audio → IPA)
+ipa_audio_map, errors_1 = run_whisper_phase(
+    df, MODEL_IPA_WHISPER, "Phase 1/3: IPA-Whisper (Audio → IPA)"
 )
-# phonemize gibt bei Listen eine Liste zurück
-if isinstance(sentences_ipa_raw, str):
-    sentences_ipa_raw = [sentences_ipa_raw]
 
-df_results["sentence_ipa"] = sentences_ipa_raw
-print(f"   {len(sentences_ipa_raw):,} Sätze konvertiert.")
+# Phase 2: Swiss-Whisper (Audio → Hochdeutsch)
+swiss_hd_map, errors_2 = run_whisper_phase(
+    df, MODEL_SWISS_WHISPER, "Phase 2/3: Swiss-Whisper (Audio → Hochdeutsch)",
+    forced_ids_fn=lambda p: p.get_decoder_prompt_ids(language="german", task="transcribe"),
+)
 
-# Wort-Alignment berechnen
-print("Berechne Wort-Alignments ...")
-alignments = []
-for _, row in df_results.iterrows():
-    ref_ipa = row.get("sentence_ipa", "")
-    spoken_ipa = row.get("transcription_ipa", "")
-    if ref_ipa and spoken_ipa:
-        al = align_words(str(ref_ipa), str(spoken_ipa))
-        alignments.append(json.dumps(al, ensure_ascii=False))
-    else:
-        alignments.append("[]")
+# Phase 3: Phonemizer (gebatcht – 2 Aufrufe statt ~7'000)
+print(f"\n{'=' * 60}")
+print("Phase 3/3: Phonemizer (Text → IPA)")
+print(f"{'=' * 60}")
 
-df_results["word_alignment"] = alignments
+sentences = [str(row["sentence"]) for _, row in df.iterrows()]
+swiss_hds = [swiss_hd_map.get(row["path"], "") for _, row in df.iterrows()]
 
-# Mittlere Distanz pro Zeile als schnelle Metrik
-def mean_distance(alignment_json):
-    al = json.loads(alignment_json)
-    if not al:
-        return None
-    return round(sum(a["distance"] for a in al) / len(al), 2)
+print("  Referenz-Sätze → IPA ...")
+ipa_refs = batch_text_to_ipa(sentences)
+print("  Swiss-Whisper-Output → IPA ...")
+ipa_swiss = batch_text_to_ipa(swiss_hds)
+print("  Fertig.\n")
 
-df_results["mean_ipa_distance"] = df_results["word_alignment"].apply(mean_distance)
+# Zusammenführen
+all_errors  = errors_1 + errors_2
+error_paths = {e["path"] for e in all_errors}
+
+results = []
+for i, (_, row) in enumerate(df.iterrows()):
+    if row["path"] in error_paths:
+        continue
+    results.append({
+        "path":              row["path"],
+        "dialect_region":    row["dialect_region"],
+        "sentence":          row["sentence"],
+        "ipa_reference":     ipa_refs[i],
+        "ipa_audio":         ipa_audio_map.get(row["path"], ""),
+        "ipa_swiss_whisper": ipa_swiss[i],
+    })
 
 # Speichern
-df_results.to_csv(OUTPUT_CSV, index=False)
+df_out = pd.DataFrame(results, columns=[
+    "path", "dialect_region", "sentence",
+    "ipa_reference", "ipa_audio", "ipa_swiss_whisper",
+])
+df_out.to_csv(OUTPUT_CSV, index=False)
 
-print(f"\n{'=' * 60}")
-print(f"✅ Fertig!")
-print(f"   Gespeichert: {OUTPUT_CSV}")
+if all_errors:
+    pd.DataFrame(all_errors).to_csv(ERRORS_CSV, index=False)
+
+elapsed_total = time.time() - overall_start
 print(f"{'=' * 60}")
-print(f"\n📊 Output-Spalten:")
-print(f"   transcription_whisper → Hochdeutsch (Baseline)")
-print(f"   transcription_ipa     → IPA-Phoneme (Dialekt-Signal)")
-print(f"   sentence_ipa          → Referenzsatz in IPA (espeak-ng)")
-print(f"   word_alignment        → JSON: Wortpaare + Levenshtein-Distanz")
-print(f"   mean_ipa_distance     → Mittlere Distanz pro Satz")
+print(f"Fertig!")
+print(f"   Erfolgreich: {len(results):,} / {len(df):,}")
+print(f"   Fehler:      {len(all_errors):,}  {'→ ' + ERRORS_CSV if all_errors else ''}")
+print(f"   Dauer:       {elapsed_total / 60:.1f} Minuten")
+print(f"   Output:      {OUTPUT_CSV}")
+print(f"{'=' * 60}")
