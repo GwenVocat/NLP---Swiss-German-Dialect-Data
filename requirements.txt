@@ -11,3 +11,5 @@ accelerate
 safetensors
 phonemizer
 protobuf
+python-Levenshtein
+jupyter
