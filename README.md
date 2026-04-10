@@ -1,16 +1,20 @@
-# 🇨🇭 Schweizerdeutsche Dialekt-Analyse
+# Schweizerdeutsche Dialekt-Analyse
 
 **Forschungsfrage:** *Wie lassen sich die häufigsten Wörter des Ostschweiz-Dialekts systematisch hochdeutschen Äquivalenten zuordnen?*
 
-Abrgrenzen, und vielleicht nur einzelne wörter eine Region
-
 ---
 
-## 📋 Projektübersicht
+## Projektübersicht
 
-Dieses Projekt untersucht Schweizerdeutsche Dialekte anhand von Audioaufnahmen aus dem [Swiss German Speech Corpus](https://www.sds-www.ch/). Sprachaufnahmen werden mit zwei Modellen transkribiert: Whisper liefert Hochdeutsch-Text, wav2vec2-lv-60-espeak-cv-ft liefert IPA-Phoneme. Anschliessend mittels **TF-IDF** und **Machine Learning** analysiert, um Dialektregionen automatisch zu erkennen.
+Dieses Projekt untersucht den Ostschweizer Dialekt anhand von Audioaufnahmen aus dem [Swiss German Speech Corpus](https://www.sds-www.ch/). Die Aufnahmen werden mit drei Modellen verarbeitet:
 
-### Dialektregionen (7)
+- **`neurlang/ipa-whisper-base`** – transkribiert Audio direkt zu IPA-Phonemen (tatsächliche Aussprache)
+- **`Flurin17/whisper-large-v3-turbo-swiss-german`** – transkribiert Audio zu Hochdeutsch
+- **Phonemizer (espeak-ng)** – wandelt die Hochdeutsch-Referenzsätze in IPA um
+
+Durch **Co-Occurrence-Analyse** werden IPA-Dialektwörter systematisch ihren hochdeutschen Entsprechungen zugeordnet.
+
+### Dialektregionen im Datensatz (7)
 
 | Region | Kantone (Beispiele) |
 |--------|-------------------|
@@ -18,41 +22,47 @@ Dieses Projekt untersucht Schweizerdeutsche Dialekte anhand von Audioaufnahmen a
 | Bern | BE |
 | Graubünden | GR |
 | Innerschweiz | LU, UR, SZ, OW, NW, ZG |
-| Ostschweiz | SG, TG, AR, AI, GL |
+| **Ostschweiz** | **SG, TG, AR, AI, GL** ← Fokus dieser Analyse |
 | Wallis | VS |
 | Zürich | ZH |
 
 ---
 
-## 🗂 Projektstruktur
+## Projektstruktur
 
 ```
 NLP---Swiss-German-Dialect-Data/
-├── README.md                  ← Du bist hier
-├── requirements.txt           ← Python-Abhängigkeiten
-├── analysis.ipynb             ← Jupyter Notebook: Datenexploration & Visualisierung
-├── transcribe.py              ← Whisper-Transkription aller Samples von der Ostschweizer Dialektes
-├── classify.py                ← TF-IDF, Classifier, Plots (TODO)
+├── README.md                          ← Du bist hier
+├── requirements.txt                   ← Python-Abhängigkeiten
+├── transcribe.py                      ← Schritt 1: Transkription (3 Modelle)
+├── clean.py                           ← Schritt 2: Datenbereinigung
+├── classify.py                        ← Schritt 3: Ostschweiz-Mapping (Co-Occurrence)
+├── analysis.ipynb                     ← Weitere Analyse
+├── check_ipa.ipynb                    ← IPA-Output prüfen & debuggen
+├── test_whisper_settings_ostschweiz.ipynb  ← Whisper-Parameter testen
 ├── Data/
-│   ├── test.tsv               ← Originaldaten (24'605 Aufnahmen)
-│   ├── train_all.tsv          ← Trainingsdaten (komplett)
-│   ├── train_balanced.tsv     ← Trainingsdaten (balanciert)
-│   ├── valid.tsv              ← Validierungsdaten
-│   ├── sample.tsv             ← Gefiltertes Sample (1'400 Aufnahmen, 200/Region)
-│   ├── transcriptions.csv     ← Whisper-Transkriptionen (Output von transcribe.py)
-│   └── clips__test/           ← Audiodateien (.mp3)
+│   ├── test.tsv                       ← Originaldaten (24'605 Aufnahmen)
+│   ├── train_all.tsv                  ← Trainingsdaten (komplett)
+│   ├── train_balanced.tsv             ← Trainingsdaten (balanciert)
+│   ├── valid.tsv                      ← Validierungsdaten
+│   ├── sample.tsv                     ← Gefiltertes Sample (1'400 Aufnahmen, 200/Region)
+│   ├── transcriptions.csv             ← Rohe Transkriptionen (Output von transcribe.py)
+│   ├── transcriptions_clean.csv       ← Bereinigte Transkriptionen (Output von clean.py)
+│   ├── ostschweiz_mapping_results.csv ← Mapping-Ergebnisse (Output von classify.py)
+│   ├── test_whisper_ostschweiz.csv    ← Whisper-Testläufe
+│   └── clips__test/                   ← Audiodateien (.mp3)
 │       └── [speaker_id]/[clip_hash].mp3
-└── .venv/                     ← Virtuelle Umgebung (nicht im Repo)
+└── .venv/                             ← Virtuelle Umgebung (nicht im Repo)
 ```
 
 ---
 
-## 🔧 Setup
+## Setup
 
 ### Voraussetzungen
-- Python 3.12+
+- Python 3.1+
 - macOS (Apple Silicon empfohlen für MPS-Beschleunigung)
-- ~10 GB Speicher für Whisper-Modell
+- ~10 GB Speicher für die Whisper-Modelle
 
 ### Installation
 
@@ -69,20 +79,20 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### ⚠️ Wichtig: Immer `.venv` verwenden!
+### Wichtig: Immer `.venv` verwenden!
 
 ```bash
-# ✅ Richtig (mit aktiviertem .venv)
+# Richtig (mit aktiviertem .venv)
 source .venv/bin/activate
 python transcribe.py
 
-# ❌ Falsch (Anaconda → NumPy-Konflikte!)
+# Falsch (Anaconda → NumPy-Konflikte!)
 /opt/anaconda3/bin/python transcribe.py
 ```
 
 ---
 
-## 📊 Datensatz
+## Datensatz
 
 - **Quelle:** Swiss German Speech Corpus
 - **Gesamtdaten:** 24'605 Aufnahmen (test.tsv)
@@ -96,7 +106,7 @@ python transcribe.py
 |--------|-------------|
 | `path` | Relativer Pfad zur MP3-Datei (`speaker_id/clip_hash.mp3`) |
 | `duration` | Aufnahmedauer in Sekunden |
-| `sentence` | ⚠️ **Hochdeutscher Quellsatz** – NICHT der gesprochene Dialekt! |
+| `sentence` | **Hochdeutscher Quellsatz** – NICHT der gesprochene Dialekt! |
 | `sentence_source` | Herkunft des Satzes (parliament, news_switz, news_cultu, ...) |
 | `client_id` | Anonymisierte Speaker-ID |
 | `dialect_region` | Dialektregion (Basel, Bern, Graubünden, Innerschweiz, Ostschweiz, Wallis, Zürich) |
@@ -107,39 +117,21 @@ python transcribe.py
 
 ---
 
-## 🚀 Pipeline
+## Pipeline
 
-### Schritt 1 – Exploration & Sampling (`analysis.ipynb`)
+### Schritt 1 – Transkription (`transcribe.py`)
 
-Jupyter Notebook mit interaktiven Visualisierungen:
-
-1. **Daten laden** – TSV einlesen, Überblick
-2. **Visualisierungen:**
-   - Aufnahmen pro Dialektregion
-   - Verteilung der Aufnahmedauer (Histogramm + Boxplot pro Region)
-   - Geschlechterverteilung (gesamt + pro Region)
-   - Altersverteilung (gesamt + pro Region)
-   - Top-15 Kantone, Satzquellen
-3. **Filtern** – Nur Aufnahmen mit 2s ≤ duration ≤ 15s
-4. **Stratifiziertes Sampling** – 200 Aufnahmen pro Region → 1'400 total
-5. **Audio-Check** – Waveform + Mel-Spektrogramm einer Beispieldatei
-
-```bash
-jupyter notebook analysis.ipynb
-```
-
-### Schritt 2 – Transkription (`transcribe.py`)
-
-Transkribiert alle 1'400 Sample-Dateien mit **2 Modellen parallel**:
+Transkribiert alle Ostschweizer Sample-Dateien mit **3 Modellen sequenziell** (um RAM zu sparen):
 
 | Modell | Output | Zweck |
 |--------|--------|-------|
-| `openai/whisper-large-v2` | Hochdeutsch | Baseline – subtiles Dialekt-"Leakage" |
-| `neurlang/ipa-whisper-base` | IPA-Phoneme | Direkte Lautschrift – starkes Dialekt-Signal |
+| `neurlang/ipa-whisper-base` | IPA-Phoneme | Tatsächliche Aussprache aus Audio |
+| `Flurin17/whisper-large-v3-turbo-swiss-german` | Hochdeutsch | Swiss-Whisper-Transkription |
+| Phonemizer (espeak-ng) | IPA-Phoneme | IPA der Hochdeutsch-Referenzsätze |
 
 ```bash
 python transcribe.py
-# ⏱ Dauer: ~45-60 Min (Apple Silicon)
+# Dauer: ~45-60 Min (Apple Silicon MPS)
 ```
 
 **Output-Spalten in `transcriptions.csv`:**
@@ -149,61 +141,77 @@ python transcribe.py
 | `path` | Dateipfad |
 | `dialect_region` | Dialektregion |
 | `sentence` | Original-Hochdeutsch (Referenz) |
-| `transcription_whisper` | Hochdeutsch (Whisper large-v2) |
-| `transcription_ipa` | IPA-Phoneme (neurlang/ipa-whisper-base) |
+| `ipa_reference` | IPA der Referenz (via Phonemizer) |
+| `ipa_audio` | IPA aus Audio (via IPA-Whisper) |
+| `ipa_swiss_whisper` | IPA der Swiss-Whisper-Transkription (via Phonemizer) |
 
-> **Warum IPA?** Whisper normalisiert Dialekt zu Hochdeutsch – alle Regionen sehen fast gleich aus.
-> IPA transkribiert die **tatsächliche Aussprache**: Walliser `frˈyːɛɪk` vs. Zürcher `ruhig` wird direkt sichtbar.
-> Für den Classifier kann man beide Spalten vergleichen und schauen, welche besser performt.
+> **Warum IPA aus Audio?** Whisper normalisiert Dialekt zu Hochdeutsch – `ipa_audio` transkribiert die **tatsächliche Aussprache**. Der Vergleich von `ipa_audio` mit `ipa_reference` macht Dialektunterschiede direkt messbar.
 
-### Schritt 3 & 4 – Analyse & Klassifikation (`classify.py`) 🔜
+### Schritt 2 – Datenbereinigung (`clean.py`)
 
-- **TF-IDF** pro Dialektregion → Top-Wörter extrahieren
-- **Cosine-Similarity Heatmap** zwischen Regionen
-- **Wordclouds** pro Region
-- **Classifier:** Logistic Regression vs. Naive Bayes (80/20 Split)
-- **Confusion Matrix** + **Schweizerkarte** mit Accuracy pro Region
+Filtert `transcriptions.csv` → `transcriptions_clean.csv`:
+
+1. Nur `dialect_region == "Ostschweiz"`
+2. Zeilen aus `errors.csv` ausschliessen (falls vorhanden)
+3. Leere / zu kurze IPA-Felder entfernen (< 3 Zeichen)
+4. Garbled-Output-Erkennung: < 20% echte IPA-Zeichen → raus
+5. Repetitions-Erkennung: Muster von 2–6 Zeichen, ≥ 4× hintereinander → raus
+6. IPA-Normalisierung: Betonungszeichen (ˈ ˌ) entfernen, Whitespace normalisieren
+
+```bash
+python clean.py
+```
+
+### Schritt 3 – Ostschweiz-Mapping (`classify.py`)
+
+Liest `transcriptions_clean.csv` und analysiert, welche IPA-Dialektwörter am häufigsten mit welchen Hochdeutschen Wörtern im selben Satz auftauchen (**Co-Occurrence**):
+
+1. `ipa_audio` in Einzelwörter zerlegen
+2. Hochdeutsche Referenz bereinigen (Kleinschreibung, Satzzeichen entfernen)
+3. Für jedes IPA-Wort: häufigstes co-occurrendes Hochdeutsch-Wort finden
+4. Top-50 häufigste Ostschweizer IPA-Wörter mit ihrer Hochdeutsch-Zuordnung ausgeben
+
+```bash
+python classify.py
+# Output: Data/ostschweiz_mapping_results.csv
+```
+
+**Output-Spalten in `ostschweiz_mapping_results.csv`:**
+
+| Spalte | Beschreibung |
+|--------|-------------|
+| `IPA_Dialekt` | Häufigstes IPA-Wort aus der Ostschweizer Aussprache |
+| `Hochdeutsch_Zuordnung` | Wahrscheinlichstes hochdeutsches Äquivalent |
+| `Gemeinsame_Treffer` | Anzahl Sätze, in denen beide Wörter vorkommen |
 
 ---
 
-## 📁 Wichtige Dateien für den nächsten Schritt
+## Tech Stack
 
-Wenn `transcribe.py` durchgelaufen ist, brauchst du:
-
-| Datei | Wozu |
-|-------|------|
-| `Data/transcriptions.csv` | Input für TF-IDF & Classifier |
-| `Data/sample.tsv` | Metadaten zum Sample (Region, Alter, Geschlecht, etc.) |
-| `analysis.ipynb` | Explorative Analyse nachvollziehen |
-
----
-
-## 🛠 Tech Stack
-
-| Tool | Version | Zweck |
-|------|---------|-------|
-| Python | 3.12+ | Programmiersprache |
-| pandas | – | Datenverarbeitung |
-| librosa | – | Audio laden & analysieren |
-| transformers | – | Whisper-Modell (HuggingFace) |
-| torch | – | Deep Learning Backend |
-| scikit-learn | – | TF-IDF, Classifier, Metriken |
-| matplotlib | – | Visualisierungen |
-| wordcloud | – | Wordcloud-Grafiken |
+| Tool | Zweck |
+|------|-------|
+| Python 3.11+ | Programmiersprache |
+| pandas | Datenverarbeitung |
+| librosa | Audio laden & analysieren |
+| transformers | Whisper-Modelle (HuggingFace) |
+| torch | Deep Learning Backend (MPS/CUDA/CPU) |
+| phonemizer | Text → IPA (espeak-ng) |
+| scikit-learn | Metriken |
+| matplotlib | Visualisierungen |
 
 ---
 
-## 👥 Team
+## Team
 
 | Wer | Aufgabe |
 |-----|---------|
-| Gwen | Schritte 1–2: Exploration, Sampling, Transkription |
-| Chris | Schritte 3–4: TF-IDF, Classifier, Visualisierungen |
+| Gwen | Schritte 1–2: Transkription, Datenbereinigung |
+| Chris | Schritt 3: Mapping-Analyse, Visualisierungen |
 
 ---
 
-## 📝 Bekannte Hinweise
+## Bekannte Hinweise
 
-- **NumPy-Konflikt:** Anaconda-Python (`/opt/anaconda3/bin/python`) hat einen Versionskonflikt. Immer das `.venv` verwenden!
-- **`sentence`-Spalte:** Enthält den hochdeutschen Quellsatz, NICHT die gesprochene Dialektversion. Für die Analyse die `transcription`-Spalte aus `transcriptions.csv` verwenden.
-- **Whisper-Modell:** Wird beim ersten Start heruntergeladen (~6 GB). Danach ist es lokal gecacht.
+- **NumPy-Konflikt:** Anaconda-Python (`/opt/anaconda3/bin/python`) hat einen Versionskonflikt mit den verwendeten Bibliotheken. Immer das `.venv` verwenden!
+- **`sentence`-Spalte:** Enthält den hochdeutschen Quellsatz, NICHT die gesprochene Dialektversion. Für die Analyse `ipa_audio` aus `transcriptions_clean.csv` verwenden.
+- **Modell-Download:** Die Whisper-Modelle werden beim ersten Start heruntergeladen (~6–10 GB). Danach lokal gecacht.
