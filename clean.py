@@ -9,11 +9,13 @@ Filterschritte:
   2. Zeilen mit errors.csv ausschliessen (falls vorhanden)
   3. Leere / zu kurze IPA-Felder entfernen (< 3 Zeichen)
   4. Garbled-Output-Erkennung: < 20% echte IPA-Zeichen in ipa_audio → raus
-  5. IPA-Normalisierung: ˈ ˌ entfernen, Whitespace normalisieren
+  5. Repetitions-Erkennung: Muster von 2–6 Zeichen, ≥ 4× hintereinander → raus
+  6. IPA-Normalisierung: ˈ ˌ entfernen, Whitespace normalisieren
 
 Verwendung: python clean.py
 """
 
+import re
 import unicodedata
 import os
 import pandas as pd
@@ -99,7 +101,28 @@ print(f"Nach Garbled-Filter: {len(df):,} Zeilen ({n_garbled} entfernt)")
 
 
 # ============================================================
-# 6. IPA-Normalisierung: Stressmarker entfernen, Whitespace normalisieren
+# 6. Repetitions-Erkennung in ipa_audio
+# ============================================================
+def has_repetition(text: str, min_len: int = 2, max_len: int = 6, min_reps: int = 4) -> bool:
+    """True wenn ein Muster von min_len–max_len Zeichen ≥ min_reps-mal hintereinander vorkommt."""
+    if not isinstance(text, str) or not text:
+        return False
+    for n in range(min_len, max_len + 1):
+        if re.search(r'(.{' + str(n) + r'})\1{' + str(min_reps - 1) + r',}', text):
+            return True
+    return False
+
+
+before = len(df)
+mask_rep = df["ipa_audio"].apply(has_repetition)
+df = df[~mask_rep].copy()
+n_rep = before - len(df)
+removed_counts["Repetitiver ipa_audio-Output"] = n_rep
+print(f"Nach Repetitions-Filter: {len(df):,} Zeilen ({n_rep} entfernt)")
+
+
+# ============================================================
+# 7. IPA-Normalisierung: Stressmarker entfernen, Whitespace normalisieren
 # ============================================================
 STRESS_REMOVE = str.maketrans("", "", "ˈˌ")
 
@@ -115,7 +138,7 @@ print(f"IPA normalisiert (ˈ ˌ  entfernt, Whitespace bereinigt)")
 
 
 # ============================================================
-# 7. Speichern
+# 8. Speichern
 # ============================================================
 df.to_csv("Data/transcriptions_clean.csv", index=False)
 print(f"\nGespeichert: Data/transcriptions_clean.csv")
