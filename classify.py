@@ -1,106 +1,70 @@
 """
-Schritt 3.1 – Pipeline: IPA-Bereinigung + TF-IDF Berechnung
+Neuer Schritt 3 – Mapping: Ostschweizer Dialekt zu Hochdeutsch
 
-Laedt transcriptions.csv, bereinigt IPA-Strings und berechnet
-TF-IDF fuer beide Transkriptions-Varianten (Whisper + IPA).
+Liest transcriptions_clean.csv ein, filtert nach der Ostschweiz und
+zählt, welche IPA-Wörter (Dialekt) am häufigsten mit welchen
+Hochdeutschen Wörtern im selben Satz auftauchen (Co-Occurrence).
 
-Input:  Data/transcriptions.csv
-Output: Data/tfidf_results.pkl  (TF-IDF Matrizen, Vektoren, Top-Words)
-        Data/transcriptions_clean.csv (mit ipa_clean Spalte)
-
-Verwendung: python classify.py
+Forschungsfrage: Wie lassen sich die häufigsten Wörter des Ostschweiz-Dialekts
+systematisch hochdeutschen Äquivalenten zuordnen?
 """
 
-import pickle
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
+from collections import defaultdict, Counter
+import re
 
+print("1. Lade Daten und filtere nach Ostschweiz...")
+df = pd.read_csv("Data/transcriptions_clean.csv")
 
-# ============================================================
-# 1. Daten laden
-# ============================================================
-print("1. Daten laden...")
-df = pd.read_csv("Data/transcriptions.csv")
-df["transcription_whisper"] = df["transcription_whisper"].fillna("")
-df["transcription_ipa"] = df["transcription_ipa"].fillna("")
+# Wir betrachten nur die Ostschweiz
+df_ost = df[df["dialect_region"] == "Ostschweiz"].copy()
 
-regions = sorted(df["dialect_region"].unique())
-print(f"   {len(df):,} Zeilen, {len(regions)} Regionen: {regions}")
+# Leeres Dictionary für unser Mapping: IPA-Wort -> Zähler für Hochdeutsche Wörter
+# Beispiel: mapping["vitə"]["weiter"] = 15
+word_mapping = defaultdict(Counter)
 
+print(f"2. Analysiere {len(df_ost)} Sätze auf Kookkurrenzen...")
 
+for index, row in df_ost.iterrows():
+    # 1. Hochdeutschen Satz bereinigen (Satzzeichen weg, alles klein)
+    hg_sentence = str(row["sentence"]).lower()
+    hg_sentence = re.sub(r'[^\w\s]', '', hg_sentence) # Entfernt Punkte, Kommas etc.
+    hg_words = hg_sentence.split()
 
+    # 2. Schweizerdeutsches IPA nehmen (ist durch Leerzeichen getrennt)
+    ipa_sentence = str(row["ipa_audio"])
+    ipa_words = ipa_sentence.split()
 
+    # 3. Kookkurrenz zählen: Jedes IPA-Wort mit jedem Hochdeutschen Wort verknüpfen
+    for ipa_w in ipa_words:
+        # Kurze Laute (wie "a" oder "i") ignorieren wir oft, da sie Rauschen erzeugen
+        if len(ipa_w) > 1:
+            for hg_w in hg_words:
+                word_mapping[ipa_w][hg_w] += 1
 
-# ============================================================
-# 2. TF-IDF berechnen
-# ============================================================
-print("\n3. TF-IDF berechnen...")
+print("\n3. Extrahiere die systematischen Zuordnungen...")
+# Wir suchen uns die häufigsten IPA-Wörter und ihr wahrscheinlichstes Hochdeutsches Pendant
+systematic_mapping = []
 
-# --- 3a: Whisper (Wort-basiert) ---
-print("   Whisper (Wort-TF-IDF)...")
-region_docs_whisper = df.groupby("dialect_region")["transcription_whisper"].apply(" ".join)
+# Sortiere IPA-Wörter danach, wie oft sie generell vorkommen
+sorted_ipa = sorted(word_mapping.keys(), key=lambda k: sum(word_mapping[k].values()), reverse=True)
 
-vec_whisper = TfidfVectorizer(max_features=5000)
-tfidf_whisper = vec_whisper.fit_transform(region_docs_whisper)
-features_whisper = vec_whisper.get_feature_names_out()
+# Nimm die Top 50 häufigsten Ostschweizer IPA-Wörter
+for ipa_word in sorted_ipa[:50]:
+    # Das häufigste Hochdeutsche Wort, das zusammen mit diesem IPA-Wort auftaucht
+    most_common_hg = word_mapping[ipa_word].most_common(1)[0]
 
-top_whisper = {}
-for i, region in enumerate(region_docs_whisper.index):
-    scores = tfidf_whisper[i].toarray().flatten()
-    top_idx = scores.argsort()[-20:][::-1]
-    top_whisper[region] = [(features_whisper[j], float(scores[j])) for j in top_idx]
+    systematic_mapping.append({
+        "IPA_Dialekt": ipa_word,
+        "Hochdeutsch_Zuordnung": most_common_hg[0],
+        "Gemeinsame_Treffer": most_common_hg[1]
+    })
 
-# --- 3b: IPA (Character N-Grams, bereinigt) ---
-print("   IPA (Character N-Gram TF-IDF, bereinigt)...")
-region_docs_ipa = df.groupby("dialect_region")["ipa_clean"].apply(" ".join)
+# Ergebnisse als DataFrame anzeigen und speichern
+results_df = pd.DataFrame(systematic_mapping)
+print("\nTop 10 Ergebnisse:")
+print(results_df.head(10))
 
-vec_ipa = TfidfVectorizer(
-    analyzer="char_wb",
-    ngram_range=(2, 4),
-    max_features=5000,
-)
-tfidf_ipa = vec_ipa.fit_transform(region_docs_ipa)
-features_ipa = vec_ipa.get_feature_names_out()
-
-top_ipa = {}
-for i, region in enumerate(region_docs_ipa.index):
-    scores = tfidf_ipa[i].toarray().flatten()
-    top_idx = scores.argsort()[-20:][::-1]
-    top_ipa[region] = [(features_ipa[j], float(scores[j])) for j in top_idx]
-
-
-# ============================================================
-# 3. Ergebnisse speichern
-# ============================================================
-print("\n4. Ergebnisse speichern...")
-
-results = {
-    # Top-Words pro Region
-    "top_whisper": top_whisper,
-    "top_ipa": top_ipa,
-    # TF-IDF Matrizen (fuer Heatmap etc.)
-    "tfidf_whisper": tfidf_whisper,
-    "tfidf_ipa": tfidf_ipa,
-    # Vectorizer (fuer spaetere Klassifikation)
-    "vec_whisper": vec_whisper,
-    "vec_ipa": vec_ipa,
-    # Region-Labels
-    "regions_whisper": region_docs_whisper.index.tolist(),
-    "regions_ipa": region_docs_ipa.index.tolist(),
-}
-
-with open("Data/tfidf_results.pkl", "wb") as f:
-    pickle.dump(results, f)
-
-print("   Gespeichert: Data/tfidf_results.pkl")
-
-# Kurze Zusammenfassung
-print("\n" + "=" * 50)
-print("Fertig! Zusammenfassung:")
-print("=" * 50)
-for region in sorted(top_whisper):
-    w_top3 = ", ".join(w[0] for w in top_whisper[region][:3])
-    i_top3 = ", ".join(f'"{w[0]}"' for w in top_ipa[region][:3])
-    print(f"  {region}:")
-    print(f"    Whisper: {w_top3}")
-    print(f"    IPA:     {i_top3}")
+# Speichern für den Bericht
+results_df.to_csv("Data/ostschweiz_mapping_results.csv", index=False)
+print("\nErfolgreich gespeichert unter Data/ostschweiz_mapping_results.csv")
