@@ -13,3 +13,5 @@ phonemizer
 protobuf
 python-Levenshtein
 jupyter
+scipy
+Levenshtein
